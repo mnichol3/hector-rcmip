@@ -1,3 +1,6 @@
+# Documentation for the drake R package:
+# https://books.ropensci.org/drake/scripts.html
+
 # Strict-ish dependency checking
 options(conflicts.policy = "depends.ok")
 conflictRules("testthat", exclude = c("matches", "is_null", "equals",
@@ -46,6 +49,12 @@ models <- c(cmip6_params()[["model"]], "default")
 rcmip_infile <- here("inst", "rcmip-inputs.fst")
 if (!file.exists(rcmip_infile)) generate_rcmip_inputs()
 
+#' Run an RCMIP Scenario using Hector
+#'
+#' @param scenario Name of scenario
+#' @param cmip6_model CMIP6 model parameter set to use.
+#' @return [Hector core object at the run end date]???
+#' @author Alexey Shiklomanov
 do_scenario <- function(scenario, cmip6_model) {
   core <- run_scenario(scenario, cmip6_model)
   rcmip_outputs(core, dates = 1750:2100) %>%
@@ -53,7 +62,7 @@ do_scenario <- function(scenario, cmip6_model) {
                   cmip6_model = cmip6_model)
 }
 
-### Scenario outputs -- single runs
+### Plot scenario output for a single run
 plan <- drake_plan(
   out = target(
     do_scenario(scenario, model),
@@ -152,12 +161,18 @@ plan <- bind_plans(plan, drake_plan(
     )
 ))
 
-### Probability runs
+#' Bind something to something fastly
+#'
+#' @param x Something
+#' @return data table
+#' @author Alexey Shiklomanov
 fast_bind <- function(x) {
   x <- purrr::map(x, data.table::setDT)
   data.table::rbindlist(x)
 }
 
+#### Configure probability runs
+# Read emission posterior probability samples & create probability parameters
 plan <- bind_plans(plan, drake_plan(
   probability_params = read_csv(file_in(
     "data-raw/brick-posteriors/emissions_17k_posteriorSamples.csv"
@@ -270,7 +285,12 @@ plan <- bind_plans(plan, drake_plan(
     write_tsv(file_out(!!path(outdir, "meta_model.tsv")))
 ))
 
-### Diagnostic plots
+#' Create diagnostic plots for a scenario
+#'
+#' @param dat [Dataframe of scenario output]???
+#' @param cenario Name of scenario
+#' @return [Hector core object at the run end date]???
+#' @author Alexey Shiklomanov
 scenario_plot <- function(dat, scenario) {
   dat_sub <- dat %>%
     pivot_longer(dplyr::matches("[[:digit:]]{4}"),
