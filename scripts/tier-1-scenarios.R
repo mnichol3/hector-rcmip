@@ -1,4 +1,4 @@
-# Strict-ish dependency checking
+#--- Strict-ish dependency checking ---#
 options(conflicts.policy = "depends.ok")
 conflictRules("testthat", exclude = c("matches", "is_null", "equals",
                                       "not", "is_less_than"))
@@ -27,12 +27,14 @@ stopifnot(
 devtools::load_all(here())
 expose_imports("hector.rcmip")
 
+#--- Configure directories and constants ---#
 outdir <- dir_create(here("output"))
 figdir <- dir_create(here("figures"))
 
 # Git commit hash corresponding to Hector RCMIP version
 hector_version <- "62381e7"
 
+# RCMIP Phase 1 experiements (RCMIP Supplement Table S3)
 scenarios <- c(
   "piControl", "esm-piControl", "1pctCO2", "1pctCO2-4xext",
   "abrupt-4xCO2", "abrupt-2xCO2", "abrupt-0p5xCO2",
@@ -46,6 +48,14 @@ models <- c(cmip6_params()[["model"]], "default")
 rcmip_infile <- here("inst", "rcmip-inputs.fst")
 if (!file.exists(rcmip_infile)) generate_rcmip_inputs()
 
+#--- Some function definitions ---#
+
+#' Run an RCMIP Scenario using Hector
+#'
+#' @param scenario Name of scenario
+#' @param cmip6_model CMIP6 model parameter set to use
+#' @return Hector core object at the run end date
+#' @author Alexey Shiklomanov
 do_scenario <- function(scenario, cmip6_model) {
   core <- run_scenario(scenario, cmip6_model)
   rcmip_outputs(core, dates = 1750:2100) %>%
@@ -53,17 +63,33 @@ do_scenario <- function(scenario, cmip6_model) {
                   cmip6_model = cmip6_model)
 }
 
-### Scenario outputs -- single runs
+#' Bind some stuff
+#'
+#' @param x
+#' @return data.table
+#' @author Alexey Shiklomanov
+fast_bind <- function(x) {
+  x <- purrr::map(x, data.table::setDT)
+  data.table::rbindlist(x)
+}
+
+#--- RCMIP Scenario single runs ---#
+
+# Define a drake plan for the scenario runs. This plan runs the scenario
+# and plots the results
 plan <- drake_plan(
+  # Define a target ('out') for each combination of scenario & model
   out = target(
     do_scenario(scenario, model),
     transform = cross(scenario = !!scenarios, model = !!models)
   ),
+  # Define a target ('all_results'), filter & aggregate the 'out' target
   all_results = target(
     bind_rows(out) %>%
       filter(year >= 1850, year <= 2100),
     transform = combine(out)
   ),
+  # Plot the results
   everything_plot = ggplot(all_results) +
     aes(x = year, y = value, color = cmip6_model) +
     geom_line() +
@@ -81,7 +107,11 @@ plan <- drake_plan(
     )
 )
 
-### Post-processing scenario outputs
+# Define a drake plan for post-processing scenario outputs and bind it to the 
+# plan defined above.
+# 
+# Targets: scenario_df, rcmip_vars, all_results_rcmip_format, cmip_params_form,
+#          meta_model, meta_model_write
 plan <- bind_plans(plan, drake_plan(
   scenario_df = rcmip_inputs() %>%
     distinct(Model, Scenario, Region),
@@ -152,12 +182,9 @@ plan <- bind_plans(plan, drake_plan(
     )
 ))
 
-### Probability runs
-fast_bind <- function(x) {
-  x <- purrr::map(x, data.table::setDT)
-  data.table::rbindlist(x)
-}
-
+# Define a drake plan for RCMIP probability runs & bind it to the above plan
+# 
+# Targets: 
 plan <- bind_plans(plan, drake_plan(
   probability_params = read_csv(file_in(
     "data-raw/brick-posteriors/emissions_17k_posteriorSamples.csv"
