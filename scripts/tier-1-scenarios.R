@@ -76,14 +76,15 @@ fast_bind <- function(x) {
 #--- RCMIP Scenario single runs ---#
 
 # Define a drake plan for the scenario runs. This plan runs the scenario
-# and plots the results
+# and plots the results.
+# Targets: out, all_results, everything_plot
 plan <- drake_plan(
-  # Define a target ('out') for each combination of scenario & model
   out = target(
+    # Call do_scenario() for each combination of scenario & model
     do_scenario(scenario, model),
     transform = cross(scenario = !!scenarios, model = !!models)
   ),
-  # Define a target ('all_results'), filter & aggregate the 'out' target
+  # Filter & aggregate the 'out' target
   all_results = target(
     bind_rows(out) %>%
       filter(year >= 1850, year <= 2100),
@@ -107,9 +108,8 @@ plan <- drake_plan(
     )
 )
 
-# Define a drake plan for post-processing scenario outputs and bind it to the 
+# Define a drake plan for post-processing scenario outputs and bind it with the 
 # plan defined above.
-# 
 # Targets: scenario_df, rcmip_vars, all_results_rcmip_format, cmip_params_form,
 #          meta_model, meta_model_write
 plan <- bind_plans(plan, drake_plan(
@@ -182,9 +182,9 @@ plan <- bind_plans(plan, drake_plan(
     )
 ))
 
-# Define a drake plan for RCMIP probability runs & bind it to the above plan
-# 
-# Targets: 
+# Define a drake plan for RCMIP probability runs & bind it with the above plan
+# Targets: probability_params, isamps, probability_param_draws, probability_run,
+#          probability_summaries, probability_summary, probability_long
 plan <- bind_plans(plan, drake_plan(
   probability_params = read_csv(file_in(
     "data-raw/brick-posteriors/emissions_17k_posteriorSamples.csv"
@@ -233,7 +233,8 @@ plan <- bind_plans(plan, drake_plan(
   )
 ))
 
-### Formatting probability output
+# Define a drake plan for formatting probability output & bind it with the above plan
+# Targets: probability_formatted, probability_meta
 plan <- bind_plans(plan, drake_plan(
  probability_formatted = probability_long %>%
   filter(year >= 1850, year <= 2100) %>%
@@ -287,7 +288,8 @@ plan <- bind_plans(plan, drake_plan(
    )
 ))
 
-### Final output files
+# Drake plan for final output files. Bind with above plan
+# Targets: your_data_csv, meta_model_tsv
 plan <- bind_plans(plan, drake_plan(
   your_data_csv = all_results_rcmip_format %>%
     bind_rows(probability_formatted) %>%
@@ -297,7 +299,7 @@ plan <- bind_plans(plan, drake_plan(
     write_tsv(file_out(!!path(outdir, "meta_model.tsv")))
 ))
 
-### Diagnostic plots
+### Create diagnostic scenario plots
 scenario_plot <- function(dat, scenario) {
   dat_sub <- dat %>%
     pivot_longer(dplyr::matches("[[:digit:]]{4}"),
@@ -338,6 +340,9 @@ scenario_plot <- function(dat, scenario) {
     theme_bw()
   print(plt)
 }
+
+# Drake plan for diagnostic plotting function defined above
+# Targets: diagnostic_plots
 plan <- bind_plans(plan, drake_plan(
   diagnostic_plots = {
     pdf(file_out("figures/final-scenario-plots.pdf"), width = 16, height = 9.5)
@@ -346,6 +351,6 @@ plan <- bind_plans(plan, drake_plan(
   }
 ))
 
-### Make plan
+### Make the drake plan, parallelize if able
 options(clustermq.scheduler = "multicore")
 make(plan, parallelism = "clustermq", jobs = parallel::detectCores())
