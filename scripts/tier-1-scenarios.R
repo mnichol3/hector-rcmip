@@ -1,3 +1,15 @@
+#'  This script runs Tier-1 scenarios for the RCMIP project
+#'  
+#'  Notes
+#' -------
+#' * The target 'out_rcp45_default' depends on the package 'hectortools',
+#'   which can be found here: https://github.com/ashiklom/hectortools
+#'   
+#' * parallel::detectCores() (line 363) fails on Windows due to the absence of
+#'   a forking mechanism that exists on Unix & Mac.
+#'   This raises the following error:
+#'       Error: 'mcparallel' is not an exported object from 'namespace:parallel'
+
 #--- Strict-ish dependency checking ---#
 options(conflicts.policy = "depends.ok")
 conflictRules("testthat", exclude = c("matches", "is_null", "equals",
@@ -341,7 +353,7 @@ scenario_plot <- function(dat, scenario) {
   print(plt)
 }
 
-# Drake plan for diagnostic plotting function defined above
+# Drake plan for the diagnostic plotting function defined above
 # Targets: diagnostic_plots
 plan <- bind_plans(plan, drake_plan(
   diagnostic_plots = {
@@ -353,4 +365,5 @@ plan <- bind_plans(plan, drake_plan(
 
 ### Make the drake plan, parallelize if able
 options(clustermq.scheduler = "multicore")
-make(plan, parallelism = "clustermq", jobs = parallel::detectCores())
+#make(plan, parallelism = "clustermq", jobs = parallel::detectCores())
+make(plan)
