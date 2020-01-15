@@ -8,3 +8,5 @@
 ^output/
 ^scratch/
 ^scripts/
+^.*\.Rproj$
+^\.Rproj\.user$
