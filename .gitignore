@@ -3,3 +3,9 @@
 /logs
 /.drake/
 /output/
+.Rproj.user
+
+# R project files
+.Rdata
+.Rhistory
+hector-rcmip.Rproj
