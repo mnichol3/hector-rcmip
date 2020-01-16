@@ -75,6 +75,53 @@ do_scenario <- function(scenario, cmip6_model) {
                   cmip6_model = cmip6_model)
 }
 
+#' Create diagnostic scenario plots
+#'
+#' @param dat data frame of results
+#' @param scenario Name of scenario
+#' @return ggplot plot
+#' @author Alexey Shiklomanov
+scenario_plot <- function(dat, scenario) {
+  dat_sub <- dat %>%
+    pivot_longer(dplyr::matches("[[:digit:]]{4}"),
+                 names_to = "year", values_to = "value",
+                 names_ptypes = list(year = numeric())) %>%
+    filter(Scenario == scenario)
+  
+  dat_scalar <- dat_sub %>%
+    filter(!grepl("HISTCALIB", ClimateModel)) %>%
+    mutate(
+      calib_model = gsub("^.*\\|.*\\|", "", ClimateModel) %>%
+        gsub("^CMIP6-", "", .) %>%
+        gsub("-CALIB$", "", .)
+    )
+  
+  dat_prob <- dat_sub %>%
+    filter(grepl("HISTCALIB", ClimateModel)) %>%
+    mutate(stat = gsub(".*\\|HISTCALIB-(.*)", "\\1", ClimateModel)) %>%
+    select(-ClimateModel) %>%
+    pivot_wider(names_from = "stat", values_from = "value")
+  
+  fcol <- "gray25"
+  plt <- ggplot(dat_prob) +
+    aes(x = year) +
+    geom_ribbon(aes(ymin = q025, ymax = q975),
+                fill = fcol, alpha = 0.2) +
+    geom_ribbon(aes(ymin = q05, ymax = q95),
+                fill = fcol, alpha = 0.2) +
+    geom_ribbon(aes(ymin = q10, ymax = q90),
+                fill = fcol, alpha = 0.2) +
+    geom_ribbon(aes(ymin = q25, ymax = q75),
+                fill = fcol, alpha = 0.2) +
+    geom_line(aes(y = Mean, color = "probability", linetype = "probability")) +
+    geom_line(aes(y = value, color = calib_model, linetype = calib_model),
+              data = dat_scalar) +
+    facet_wrap(vars(Variable), scale = "free_y") +
+    ggtitle(scenario) +
+    theme_bw()
+  print(plt)
+}
+
 #' Bind some stuff
 #'
 #' @param x
@@ -311,47 +358,6 @@ plan <- bind_plans(plan, drake_plan(
     write_tsv(file_out(!!path(outdir, "meta_model.tsv")))
 ))
 
-### Create diagnostic scenario plots
-scenario_plot <- function(dat, scenario) {
-  dat_sub <- dat %>%
-    pivot_longer(dplyr::matches("[[:digit:]]{4}"),
-                 names_to = "year", values_to = "value",
-                 names_ptypes = list(year = numeric())) %>%
-    filter(Scenario == scenario)
-
-  dat_scalar <- dat_sub %>%
-    filter(!grepl("HISTCALIB", ClimateModel)) %>%
-    mutate(
-      calib_model = gsub("^.*\\|.*\\|", "", ClimateModel) %>%
-        gsub("^CMIP6-", "", .) %>%
-        gsub("-CALIB$", "", .)
-    )
-
-  dat_prob <- dat_sub %>%
-    filter(grepl("HISTCALIB", ClimateModel)) %>%
-    mutate(stat = gsub(".*\\|HISTCALIB-(.*)", "\\1", ClimateModel)) %>%
-    select(-ClimateModel) %>%
-    pivot_wider(names_from = "stat", values_from = "value")
-
-  fcol <- "gray25"
-  plt <- ggplot(dat_prob) +
-    aes(x = year) +
-    geom_ribbon(aes(ymin = q025, ymax = q975),
-                fill = fcol, alpha = 0.2) +
-    geom_ribbon(aes(ymin = q05, ymax = q95),
-                fill = fcol, alpha = 0.2) +
-    geom_ribbon(aes(ymin = q10, ymax = q90),
-                fill = fcol, alpha = 0.2) +
-    geom_ribbon(aes(ymin = q25, ymax = q75),
-                fill = fcol, alpha = 0.2) +
-    geom_line(aes(y = Mean, color = "probability", linetype = "probability")) +
-    geom_line(aes(y = value, color = calib_model, linetype = calib_model),
-              data = dat_scalar) +
-    facet_wrap(vars(Variable), scale = "free_y") +
-    ggtitle(scenario) +
-    theme_bw()
-  print(plt)
-}
 
 # Drake plan for the diagnostic plotting function defined above
 # Targets: diagnostic_plots
