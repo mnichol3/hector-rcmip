@@ -10,7 +10,10 @@
 #'   This raises the following error:
 #'       Error: 'mcparallel' is not an exported object from 'namespace:parallel'
 
-#--- Strict-ish dependency checking ---#
+
+# ====================== Load Dependencies & Source Files ======================
+
+# ----- Strict-ish dependency checking ----- 
 options(conflicts.policy = "depends.ok")
 conflictRules("testthat", exclude = c("matches", "is_null", "equals",
                                       "not", "is_less_than"))
@@ -39,7 +42,7 @@ stopifnot(
 devtools::load_all(here())
 expose_imports("hector.rcmip")
 
-#--- Configure directories and constants ---#
+# ----- Configure directories and constants -----
 outdir <- dir_create(here("output"))
 figdir <- dir_create(here("figures"))
 
@@ -60,7 +63,8 @@ models <- c(cmip6_params()[["model"]], "default")
 rcmip_infile <- here("inst", "rcmip-inputs.fst")
 if (!file.exists(rcmip_infile)) generate_rcmip_inputs()
 
-#--- Some function definitions ---#
+
+# ======================== Helper function definitions =========================
 
 #' Run an RCMIP Scenario using Hector
 #'
@@ -132,7 +136,8 @@ fast_bind <- function(x) {
   data.table::rbindlist(x)
 }
 
-#--- RCMIP Scenario single runs ---#
+
+# ========================= RCMIP Scenario single runs =========================
 
 # Define a drake plan for the scenario runs. This plan runs the scenario
 # and plots the results.
@@ -240,6 +245,9 @@ plan <- bind_plans(plan, drake_plan(
       `Literature Reference`
     )
 ))
+
+
+# ======================== RCMIP Probability single runs =======================
 
 # Define a drake plan for RCMIP probability runs & bind it with the above plan
 # Targets: probability_params, isamps, probability_param_draws, probability_run,
