@@ -1,5 +1,4 @@
-# Documentation for the drake R package:
-# https://books.ropensci.org/drake/scripts.html
+#!/usr/bin/env Rscript
 
 # Strict-ish dependency checking
 options(conflicts.policy = "depends.ok")
@@ -31,6 +30,7 @@ devtools::load_all(here())
 expose_imports("hector.rcmip")
 
 outdir <- dir_create(here("output"))
+raw_output_dir <- path(outdir, "zz-raw-output")
 figdir <- dir_create(here("figures"))
 
 # Git commit hash corresponding to Hector RCMIP version
@@ -49,24 +49,18 @@ models <- c(cmip6_params()[["model"]], "default")
 rcmip_infile <- here("inst", "rcmip-inputs.fst")
 if (!file.exists(rcmip_infile)) generate_rcmip_inputs()
 
-#' Run an RCMIP Scenario using Hector
-#'
-#' @param scenario Name of scenario
-#' @param cmip6_model CMIP6 model parameter set to use.
-#' @return [Hector core object at the run end date]???
-#' @author Alexey Shiklomanov
-do_scenario <- function(scenario, cmip6_model) {
-  core <- run_scenario(scenario, cmip6_model)
-  rcmip_outputs(core, dates = 1750:2100) %>%
-    dplyr::mutate(rcmip_scenario = scenario,
-                  cmip6_model = cmip6_model)
-}
+# Individual output files
+out_files <- dir_ls(
+  path(raw_output_dir, "single-run"),
+  type = "file",
+  glob = "*.csv"
+)
 
 ### Plot scenario output for a single run
 plan <- drake_plan(
   out = target(
-    do_scenario(scenario, model),
-    transform = cross(scenario = !!scenarios, model = !!models)
+    rcmip_outputs(f),
+    transform = map(f = !!out_files)
   ),
   all_results = target(
     bind_rows(out) %>%
@@ -100,8 +94,7 @@ plan <- bind_plans(plan, drake_plan(
   ) %>%
     select(Variable, Unit),
   all_results_rcmip_format = all_results %>%
-    rename(Scenario = rcmip_scenario, Variable = variable) %>%
-    select(-scenario) %>%
+    rename(Scenario = scenario, Variable = variable) %>%
     pivot_wider(names_from = "year", values_from = "value") %>%
     left_join(scenario_df, "Scenario") %>%
     left_join(rcmip_vars, "Variable") %>%
@@ -161,52 +154,54 @@ plan <- bind_plans(plan, drake_plan(
     )
 ))
 
-#' Bind something to something fastly
-#'
-#' @param x Something
-#' @return data table
-#' @author Alexey Shiklomanov
-fast_bind <- function(x) {
-  x <- purrr::map(x, data.table::setDT)
-  data.table::rbindlist(x)
+# Probability files
+
+### Probability runs
+summarize_probability_scenario <- function(scenario) {
+  .datatable.aware <- TRUE #nolint
+  scenario_file <- fs::path(
+    "output", "zz-raw-output", "probability-processed",
+    paste0(scenario, "-p.fst")
+  )
+  stopifnot(file.exists(scenario_file))
+  dat <- fst::read_fst(scenario_file, as.data.table = TRUE)
+  result <- dat[!is.na(year) & !is.na(value), .(
+    Mean = mean(value),
+    SD = sd(value),
+    q025 = quantile(value, 0.025),
+    q05 = quantile(value, 0.05),
+    q10 = quantile(value, 0.1),
+    q25 = quantile(value, 0.25),
+    q50 = quantile(value, 0.50),
+    q75 = quantile(value, 0.75),
+    q90 = quantile(value, 0.9),
+    q95 = quantile(value, 0.95),
+    q975 = quantile(value, 0.975)
+  ), .(year, variable)]
+  tibble::as_tibble(result) %>%
+    dplyr::mutate(scenario = !!scenario) %>%
+    dplyr::select(scenario, dplyr::everything())
 }
 
 #### Configure probability runs
 # Read emission posterior probability samples & create probability parameters
 plan <- bind_plans(plan, drake_plan(
-  probability_params = read_csv(file_in(
-    "data-raw/brick-posteriors/emissions_17k_posteriorSamples.csv"
-  ), col_types = cols(.default = "d")),
-  isamps = sample.int(nrow(probability_params), 1000),
-  probability_param_draws = probability_params[isamps, ],
-  probability_run = target(
-    run_with_param(
-      scenario,
-      probability_param_draws[["S.temperature"]],
-      probability_param_draws[["diff.temperature"]],
-      probability_param_draws[["alpha.temperature"]]
-    ) %>%
-      mutate(isamp = isamps),
-    dynamic = map(probability_param_draws, isamps),
-    transform = map(scenario = !!scenarios)
+  probability_summaries_raw = target(
+    summarize_probability_scenario(s),
+    transform = map(s = !!scenarios)
   ),
   probability_summaries = target(
-    fast_bind(readd(probability_run))[, .(
-      scenario = scenario,
-      Mean = mean(value),
-      SD = sd(value),
-      q025 = quantile(value, 0.025),
-      q05 = quantile(value, 0.05),
-      q10 = quantile(value, 0.1),
-      q25 = quantile(value, 0.25),
-      q50 = quantile(value, 0.50),
-      q75 = quantile(value, 0.75),
-      q90 = quantile(value, 0.9),
-      q95 = quantile(value, 0.95),
-      q975 = quantile(value, 0.975)
-    ), .(year, variable)],
-    transform = map(probability_run),
-    format = "fst_dt"
+    probability_summaries_raw %>%
+      tidyr::pivot_longer(
+        dplyr::matches("Mean|SD|q[[:digit:]]{2,3}"),
+        names_to = "stat"
+      ) %>%
+      rcmip_outputs(result = .) %>%
+      tidyr::pivot_wider(
+        names_from = "stat",
+        values_from = "value"
+      ),
+    transform = map(probability_summaries_raw)
   ),
   probability_summary = target(
     bind_rows(probability_summaries),

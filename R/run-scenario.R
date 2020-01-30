@@ -3,18 +3,29 @@
 #' @param scenario Name of scenario
 #' @param cmip6_model CMIP6 model parameter set to use. If `NULL` (default), use
 #'   Hector defaults.
+#' @param outfile Output file. Default is `output/zz-raw-output/single-run/<scenario>-<model>.csv`
 #' @param ... Additional arguments to [set_variable()]
 #' @return Hector core object at the run end date
 #' @author Alexey Shiklomanov
 #' @export
-run_scenario <- function(scenario, cmip6_model = NULL, ...) {
+run_scenario <- function(scenario, cmip6_model = NULL, outfile = NULL, ...) {
+
+  if (is.null(outfile)) {
+    modeltag <- if (is.null(cmip6_model)) "default" else cmip6_model
+    outfile <- file.path(
+      "output", "zz-raw-output", "single-run",
+      paste0(scenario, "-", modeltag, ".csv")
+    )
+    dir.create(dirname(outfile), showWarnings = FALSE, recursive = TRUE)
+  }
 
   basefile <- rcmip_ini()
   ini <- hectortools::read_ini(basefile)
   if (grepl("piControl", scenario)) {
     # For preindustrial control runs, fix natural N2O emissions to a constant
     # value. 11 TgN here is the Hector preindustrial default.
-    ini$N2O$N2O_natural_emissions <- subset(ini$N2O$N2O_natural_emissions, date == date[1])
+    ini$N2O$N2O_natural_emissions <-
+      subset(ini$N2O$N2O_natural_emissions, date == date[1])
   }
 
   hc <- hectortools::newcore_ini(ini, suppresslogging = TRUE, name = scenario)
@@ -45,6 +56,32 @@ run_scenario <- function(scenario, cmip6_model = NULL, ...) {
     }
   )
 
+  write_output(
+    hc, outfile,
+    rcmip_scenario = scenario,
+    cmip6_model = cmip6_model
+  )
+
+}
+
+write_output <- function(core, outfile, ...) {
+  mut <- rlang::list2(...)
+  # year+1 here because can't access year 1 for `LAND_CFLUX` (and maybe others)
+  alldates <- seq(hector::startdate(core) + 1, hector::enddate(core))
+  allvars <- hector::fetchvars_all(core, dates = alldates)
+  # These variables might not be in fetchvars_all
+  rplusvars <- c("NOX_emissions", "CO_emissions", "NMVOC_emissions", "Tgav_ocean_ST")
+  rplus <- hector::fetchvars(core, dates = alldates, rplusvars) %>%
+    # Remove any variables that might have been added to fetchvars_all. This
+    # ensures there are no duplicates.
+    dplyr::anti_join(allvars, "variable")
+  result <- allvars %>%
+    dplyr::bind_rows(rplus) %>%
+    dplyr::mutate(!!!mut)
+
+  # Write result to file
+  data.table::fwrite(result, outfile)
+  invisible(outfile)
 }
 
 #' Add scenario data to a Hector core
@@ -108,7 +145,7 @@ set_scenario <- function(hc, scenario, ...) {
   # CO2
   ffi <- subset_hector_var(input_sub, "ffi_emissions")
   luc <- subset_hector_var(input_sub, "luc_emissions")
-  co2 <- subset_hector_var(input_sub, "Ca_constrain")
+  co2 <- subset_hector_var(input_sub, "CO2_constrain")
 
   if (nrow(ffi) && nrow(luc)) {
     # Use FFI and LUC emissions
@@ -139,16 +176,11 @@ set_scenario <- function(hc, scenario, ...) {
 
   # CH4
   emit <- subset_hector_var(input_sub, "CH4_emissions")
-  conc <- subset_hector_var(input_sub, "CH4")
+  conc <- subset_hector_var(input_sub, "CH4_constrain")
   if (nrow(emit)) {
     hc <- set_variable(hc, emit, ...)
   } else if (nrow(conc)) {
     hc <- set_variable(hc, conc, ...)
-    if (min(conc$year) <= hector_minyear) {
-      # Also set the pre-industrial value
-      hector::setvar(hc, NA, hector::PREINDUSTRIAL_CH4(),
-                     conc$value[conc$year == hector_minyear], "ppb")
-    }
   }
 
   # OH and ozone
@@ -164,16 +196,11 @@ set_scenario <- function(hc, scenario, ...) {
 
   # N2O
   emit <- subset_hector_var(input_sub, "N2O_emissions")
-  conc <- subset_hector_var(input_sub, "N2O")
+  conc <- subset_hector_var(input_sub, "N2O_constrain")
   if (nrow(emit)) {
     hc <- set_variable(hc, emit, ...)
   } else if (nrow(conc)) {
     hc <- set_variable(hc, conc, ...)
-    if (min(conc$year) <= hector_minyear) {
-      # Also set the pre-industrial value
-      hector::setvar(hc, NA, hector::PREINDUSTRIAL_N2O(),
-                     conc$value[conc$year == hector_minyear], "ppb")
-    }
   }
 
   # Variables that can be handled naively
@@ -220,10 +247,10 @@ set_scenario <- function(hc, scenario, ...) {
 
   # Prefer emissions, then concentration, then UNKNOWN
   halocarbon_dict <- halocarbon_dict %>%
-    group_by(halocarbon) %>%
-    arrange(datatype, .by_group = TRUE) %>%
-    slice(1) %>%
-    ungroup()
+    dplyr::group_by(halocarbon) %>%
+    dplyr::arrange(datatype, .by_group = TRUE) %>%
+    dplyr::slice(1) %>%
+    dplyr::ungroup()
 
   for (i in seq_len(nrow(halocarbon_dict))) {
     irow <- halocarbon_dict[i,]

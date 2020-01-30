@@ -1,12 +1,14 @@
 #' Retrieve results with RCMIP variable names and units
 #'
-#' @param core Hector core (as returned by [run_scenario()])
+#' @param outfile Hector output file
+#' @param result `data.frame` of results. If not `NULL`, use this instead of
+#'   reading from `outfile`.
 #' @param ... Additional arguments to [fetchvars2()]
 #' @return
 #' @author Alexey Shiklomanov
 #' @export
-rcmip_outputs <- function(core, ...) {
-  results <- fetchvars2(core, c(
+rcmip_outputs <- function(outfile, result = NULL, ...) {
+  vvars <- c(
     "CH4",
     "Ca",
     "ffi_emissions", "luc_emissions",
@@ -30,10 +32,22 @@ rcmip_outputs <- function(core, ...) {
     hector::RF_BC(),
     hector::RF_OC(),
     hector::RF_SO2()
-  ), ...)
+  )
+  if (is.null(result)) {
+    colspec <- vroom::cols(
+      scenario = "c", year = "d",
+      variable = "c", value = "d", units = "c",
+      scenario = "c", cmip6_model = "c"
+    )
+    results <- vroom::vroom(outfile, col_types = colspec) %>%
+      dplyr::filter(variable %in% vvars)
+  } else {
+    results <- result %>%
+      dplyr::filter(variable %in% vvars)
+  }
 
   results_wide <- results %>%
-    dplyr::select(-units) %>%
+    dplyr::select(-dplyr::one_of("units")) %>%
     tidyr::pivot_wider(names_from = "variable", values_from = "value")
 
   results_wide2 <- results_wide %>%
@@ -72,8 +86,7 @@ rcmip_outputs <- function(core, ...) {
       )
     ) %>%
     dplyr::select(
-      scenario = scenario,
-      year = year,
+      dplyr::one_of(c("scenario", "cmip6_model", "year", "stat")),
       `Atmospheric Concentrations|CH4` = CH4,
       `Atmospheric Concentrations|CO2` = Ca,
       `Carbon Sequestration`,
@@ -101,9 +114,14 @@ rcmip_outputs <- function(core, ...) {
       `Radiative Forcing|Anthropogenic|CO2` = FCO2
     )
 
+  first_pivot <- which(colnames(results_wide2) == "Atmospheric Concentrations|CH4")
+  pivot_cols <- colnames(results_wide2)[first_pivot:ncol(results_wide2)]
+
   results_long <- results_wide2 %>%
-    tidyr::pivot_longer(-c(scenario, year),
-                        names_to = "variable",
-                        values_to = "value")
+    tidyr::pivot_longer(
+      pivot_cols,
+      names_to = "variable",
+      values_to = "value"
+    )
   results_long
 }
